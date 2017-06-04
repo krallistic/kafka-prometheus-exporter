@@ -17,10 +17,11 @@ import (
 )
 
 var (
-	addr              = flag.String("listen-address", ":8080", "The address to listen on for HTTP requests.")
-	zookeeperConnect = flag.String("zookeeperConnect", "localhost:2181",  "zookeeper Connection String")
-	clusterName = flag.String("clusterName", "kafkaCluster", "Name for the Kafka Cluster")
-	refreshInterval = flag.Int("refreshInterval", 15, "Refresh every X Seconds")
+	listenAddress       = flag.String("listen-address", ":8080", "The address on which to expose the web interface and generated Prometheus metrics.")
+	metricsEndpoint     = flag.String("telemetry-path", "/metrics", "Path under which to expose metrics.")
+	zookeeperConnect = flag.String("zookeeper-connect", "localhost:2181",  "Zookeeper connection string")
+	clusterName = flag.String("cluster-name", "kafka-cluster", "Name of the Kafka cluster used in static label")
+	refreshInterval = flag.Int("refresh-interval", 15, "Seconds to sleep in between refreshes")
 )
 
 var (
@@ -153,6 +154,6 @@ func main() {
 
 
 	// Expose the registered metrics via HTTP.
-	http.Handle("/metrics", promhttp.Handler())
-	log.Fatal(http.ListenAndServe(*addr, nil))
+	http.Handle(*metricsEndpoint, promhttp.Handler())
+	log.Fatal(http.ListenAndServe(*listenAddress, nil))
 }
