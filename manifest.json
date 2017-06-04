@@ -1,0 +1,10 @@
+{
+    "dependencies": {
+        "github.com/krallistic/kazoo-go": {
+            "branch": "master"
+        },
+        "github.com/prometheus/client_golang": {
+            "branch": "master"
+        }
+    }
+}
