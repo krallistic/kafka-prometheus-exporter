@@ -49,6 +49,15 @@ var (
 		},
 		[]string{"consumergroup", "topic", "partition"},
 	)
+	consumergroupLagGougeVec = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "kafka",
+		Subsystem: "consumergroup",
+		Name: "lag",
+		Help: "Current Approximate Lag of a ConsumerGroup at Topic/Partition",
+		ConstLabels: map[string]string{"cluster": *clusterName},
+	},
+		[]string{"consumergroup", "topic", "partition"},
+	)
 
 	brokerGougeVec = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "kafka",
@@ -71,6 +80,7 @@ func init() {
 	// Register the summary and the histogram with Prometheus's default registry.
 	prometheus.MustRegister(consumergroupGougeVec)
 	prometheus.MustRegister(brokerGougeVec)
+	prometheus.MustRegister(consumergroupLagGougeVec)
 
 }
 
@@ -97,7 +107,8 @@ func updateOffsets() {
 				brokerLabels := map[string]string{"topic": topicName, "partition": strconv.Itoa(int(partition))}
 				brokerGougeVec.With(brokerLabels).Set(float64(brokerOffset))
 
-
+				consumerGroupLag := brokerOffset - offset
+				consumergroupLagGougeVec.With(consumerGroupLabels).Set(float64(consumerGroupLag))
 				
 			}
 		}
