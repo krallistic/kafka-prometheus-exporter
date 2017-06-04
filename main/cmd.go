@@ -9,6 +9,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	kazoo "github.com/krallistic/kazoo-go"
+	"github.com/Shopify/sarama"
+
 	"strconv"
 
 	"fmt"
@@ -38,7 +40,7 @@ var (
 		map[string]string{"cluster": *clusterName},
 	)
 
-	gougeVec = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	consumergroupGougeVec = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "kafka",
 		Subsystem: "consumergroup",
 		Name: "current_offset",
@@ -48,31 +50,55 @@ var (
 		[]string{"consumergroup", "topic", "partition"},
 	)
 
+	brokerGougeVec = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "kafka",
+		Subsystem: "broker",
+		Name: "current_offset",
+		Help: "Current Offset of a Broker at Topic/Partition",
+		ConstLabels: map[string]string{"cluster": *clusterName},
+		},
+		[]string{"topic", "partition"},
+	)
+
 
 
 
 )
-var client *kazoo.Kazoo
+var zookeeperClient *kazoo.Kazoo
+var brokerClient sarama.Client
 
 func init() {
 	// Register the summary and the histogram with Prometheus's default registry.
-	prometheus.MustRegister(gougeVec)
+	prometheus.MustRegister(consumergroupGougeVec)
+	prometheus.MustRegister(brokerGougeVec)
+
 }
 
-func update() {
+func updateOffsets() {
 	startTime := time.Now()
-	fmt.Println("Updating Stats, time: ", time.Now())
-	groups, err := client.Consumergroups()
+	fmt.Println("Updating Stats, Time: ", time.Now())
+	groups, err := zookeeperClient.Consumergroups()
 	if err != nil {
 		panic(err)
 	}
+
 	for _, group := range groups {
 		offsets, _ := group.FetchAllOffsets()
 		for topicName, partitions :=  range offsets {
 			for partition, offset := range partitions{
 				//TODO dont recreate Labels everytime
-				labels := map[string]string{"consumergroup": group.Name, "topic": topicName, "partition": strconv.Itoa(int(partition))}
-				gougeVec.With(labels).Set(float64(offset))
+				consumerGroupLabels := map[string]string{"consumergroup": group.Name, "topic": topicName, "partition": strconv.Itoa(int(partition))}
+				consumergroupGougeVec.With(consumerGroupLabels).Set(float64(offset))
+				brokerOffset, err := brokerClient.GetOffset(topicName, partition, sarama.OffsetNewest)
+				if err != nil {
+					//TODO
+					fmt.Println(err)
+				}
+				brokerLabels := map[string]string{"topic": topicName, "partition": strconv.Itoa(int(partition))}
+				brokerGougeVec.With(brokerLabels).Set(float64(brokerOffset))
+
+
+				
 			}
 		}
 	}
@@ -81,21 +107,34 @@ func update() {
 
 }
 
+func updateBrokerOffsets() {
+
+}
+
 func main() {
 	flag.Parse()
 
 
 	var err error
-	client, err = kazoo.NewKazooFromConnectionString(*zookeeperConnect, nil)
+	zookeeperClient, err = kazoo.NewKazooFromConnectionString(*zookeeperConnect, nil)
 	if err != nil {
 		panic(err)
 	}
+
+	brokers, err := zookeeperClient.BrokerList()
+	if err != nil {
+		panic(err)
+	}
+
+	config := sarama.NewConfig()
+	brokerClient, err = sarama.NewClient(brokers, config)
+
 
 
 	// Periodically record some sample latencies for the three services.
 	go func() {
 		for {
-			update()
+			updateOffsets()
 			time.Sleep(time.Duration(time.Duration(*refreshInterval) * time.Second))
 		}
 	}()
