@@ -1,5 +1,8 @@
 {
     "dependencies": {
+        "github.com/Shopify/sarama": {
+            "branch": "master"
+        },
         "github.com/krallistic/kazoo-go": {
             "branch": "master"
         },
