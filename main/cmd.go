@@ -12,8 +12,8 @@ import (
 	"github.com/Shopify/sarama"
 	kazoo "github.com/krallistic/kazoo-go"
 
-	"strconv"
 	"fmt"
+	"strconv"
 )
 
 var (
@@ -83,6 +83,7 @@ func updateOffsets() {
 	fmt.Println("Updating Stats, Time: ", time.Now())
 	groups, err := zookeeperClient.Consumergroups()
 	if err != nil {
+		fmt.Println("Error reading consumergroup offsets: ", err)
 		initClients()
 		return
 	}
@@ -96,7 +97,7 @@ func updateOffsets() {
 				consumergroupGougeVec.With(consumerGroupLabels).Set(float64(offset))
 				brokerOffset, err := brokerClient.GetOffset(topicName, partition, sarama.OffsetNewest)
 				if err != nil {
-					//TODO
+					fmt.Println("Error reading offsets from broker for topic, partition: ", topicName, partition, err)
 					initClients()
 					return
 				}
@@ -108,17 +109,43 @@ func updateOffsets() {
 			}
 		}
 	}
-	fmt.Println("Done Update: ", time.Since(startTime))
+	fmt.Println("Done updating offset stats in: ", time.Since(startTime))
+}
+
+func initClients() {
+
+	fmt.Println("Init zookeeper client with connection string: ", *zookeeperConnect)
+	var err error
+	zookeeperClient, err = kazoo.NewKazooFromConnectionString(*zookeeperConnect, nil)
+	if err != nil {
+		fmt.Println("Error Init zookeeper client with connection string:", *zookeeperConnect)
+		panic(err)
+	}
+
+	brokers, err := zookeeperClient.BrokerList()
+	if err != nil {
+		fmt.Println("Error reading brokers from zk")
+		panic(err)
+	}
+
+	fmt.Println("Init Kafka Client with Brokers:", brokers)
+	config := sarama.NewConfig()
+	brokerClient, err = sarama.NewClient(brokers, config)
+
+	if err != nil {
+		fmt.Println("Error Init Kafka Client")
+		panic(err)
+	}
+	fmt.Println("Done Init Clients")
 }
 
 func main() {
 	flag.Parse()
 
+	//Init Clients
+	initClients()
 
-
-
-
-	// Periodically record some sample latencies for the three services.
+	// Periodically record stats from Kafka
 	go func() {
 		for {
 			updateOffsets()
