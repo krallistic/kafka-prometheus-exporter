@@ -88,6 +88,16 @@ var (
 	},
 		[]string{"topic", "partition"},
 	)
+
+	underreplicatedPartition = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace:   "kafka",
+		Subsystem:   "topic",
+		Name:        "under_replicated",
+		Help:        "Under Replicated partition",
+		ConstLabels: map[string]string{"cluster": *clusterName},
+	},
+		[]string{"topic", "partition"},
+	)
 )
 var zookeeperClient *kazoo.Kazoo
 var brokerClient sarama.Client
@@ -95,10 +105,14 @@ var brokerClient sarama.Client
 func init() {
 	// Register the summary and the histogram with Prometheus's default registry.
 	prometheus.MustRegister(consumergroupGougeVec)
+	prometheus.MustRegister(consumergroupLagGougeVec)
+
 	prometheus.MustRegister(topicCurrentOffsetGougeVec)
 	prometheus.MustRegister(topicOldestOffsetGougeVec)
 
-	prometheus.MustRegister(consumergroupLagGougeVec)
+	prometheus.MustRegister(inSyncReplicas)
+	prometheus.MustRegister(underreplicatedPartition)
+
 }
 
 func updateOffsets() {
@@ -111,29 +125,40 @@ func updateOffsets() {
 		return
 	}
 
-	for _, group := range groups {
-		offsets, _ := group.FetchAllOffsets()
-		for topicName, partitions := range offsets {
-			for partition, offset := range partitions {
-				//TODO dont recreate Labels everytime
-				consumerGroupLabels := map[string]string{"consumergroup": group.Name, "topic": topicName, "partition": strconv.Itoa(int(partition))}
+
+	topics, err := zookeeperClient.Topics()
+	for _, topic := range  topics {
+		partitions, _ := topic.Partitions()
+		for _, partition := range partitions {
+			topicLabel := map[string]string{"topic": topic.Name, "partition": strconv.Itoa(int(partition.ID))}
+
+			isr, _ := partition.ISR()
+			inSyncReplicas.With(topicLabel).Set(float64(len(isr)))
+			underreplicatedPartition.With(topicLabel).Set(float64(partition.UnderReplicated()))
+
+			currentOffset, err := brokerClient.GetOffset(topic.Name, partition.ID, sarama.OffsetNewest)
+			oldestOffset, err2 := brokerClient.GetOffset(topic.Name, partition.ID, sarama.OffsetOldest)
+
+			if err != nil ||  err2 != nil {
+				fmt.Println("Error reading offsets from broker for topic, partition: ", topic.Name, partition, err)
+				initClients()
+				return
+			}
+
+			topicCurrentOffsetGougeVec.With(topicLabel).Set(float64(currentOffset))
+			topicOldestOffsetGougeVec.With(topicLabel).Set(float64(oldestOffset))
+
+			for _, group := range groups {
+				offset, _ := group.FetchOffset(topic.Name, partition.ID)
+				consumerGroupLabels := map[string]string{"consumergroup": group.Name, "topic": topic.Name, "partition": strconv.Itoa(int(partition.ID))}
 				consumergroupGougeVec.With(consumerGroupLabels).Set(float64(offset))
-				currentOffset, err := brokerClient.GetOffset(topicName, partition, sarama.OffsetNewest)
-				oldestOffset, err2 := brokerClient.GetOffset(topicName, partition, sarama.OffsetOldest)
-				if err != nil ||  err2 != nil {
-					fmt.Println("Error reading offsets from broker for topic, partition: ", topicName, partition, err)
-					initClients()
-					return
-				}
-				brokerLabels := map[string]string{"topic": topicName, "partition": strconv.Itoa(int(partition))}
-				topicCurrentOffsetGougeVec.With(brokerLabels).Set(float64(currentOffset))
-				topicOldestOffsetGougeVec.With(brokerLabels).Set(float64(oldestOffset))
 
 				consumerGroupLag := currentOffset - offset
 				consumergroupLagGougeVec.With(consumerGroupLabels).Set(float64(consumerGroupLag))
 			}
 		}
 	}
+	zookeeperClient.Topics()
 	fmt.Println("Done updating offset stats in: ", time.Since(startTime))
 }
 
