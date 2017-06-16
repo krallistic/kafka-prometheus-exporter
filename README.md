@@ -2,8 +2,13 @@
 
 Simple Prometheus exporter to export Metrics around Offsets & Consumergroup. Currently it exports three types of Metrrics:
 
- - `kafka_consumergroup_current_offset` Current offset of every consumergroup by Topic/Partition
  - `kafka_broker_current_offset` Current Offset at the Broker by Topic/Partion
+ - `kafka_topic_oldest_offset` Oldest Offset still current in topic
+ - `kafka_topic_in_sync_replica` Number of replicas which are inSync with the Topic/Partition leader.
+ - `kafka_topic_under_replicated` Bool if all replicas are inSync by topic/partition.
+
+ If you use old consumer (which store their offset in zookeeper), these two Metrics about consumergroups and their offset are also aviable:
+ - `kafka_consumergroup_current_offset` Current offset of every consumergroup by Topic/Partition
  - `kafka_consumergroup_lag` Approximate Lag of every consumergroup by Topic/Partition. Please note the Lag is not 100% Correct.
 
 # Build 
