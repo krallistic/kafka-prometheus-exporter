@@ -3,7 +3,7 @@
 
 .PHONY: all build container push clean test
 
-TAG ?= v0.0.2
+TAG ?= v0.1.0
 PREFIX ?= krallistic
 
 all: container
@@ -14,7 +14,7 @@ build:
 container: build
 	docker build -t $(PREFIX)/kafka_exporter:$(TAG) .
 
-push:
+push: container
 	docker push $(PREFIX)/kafka_exporter:$(TAG)
 
 clean:
