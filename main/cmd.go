@@ -1,10 +1,12 @@
 package main
 
+
 import (
-	"flag"
+	"github.com/namsral/flag"
 	"log"
 	"net/http"
 	"time"
+	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -13,7 +15,7 @@ import (
 	kazoo "github.com/krallistic/kazoo-go"
 
 	"fmt"
-	"strconv"
+
 )
 
 var (
@@ -22,7 +24,7 @@ var (
 	zookeeperConnect = flag.String("zookeeper-connect", "localhost:2181", "Zookeeper connection string")
 	clusterName      = flag.String("cluster-name", "kafka-cluster", "Name of the Kafka cluster used in static label")
 
-	refreshInterval  = flag.Int("refresh-interval", 15, "Seconds to sleep in between refreshes")
+	refreshInterval  = flag.Int("refresh-interval", 5, "Seconds to sleep in between refreshes")
 )
 
 var (
@@ -102,6 +104,13 @@ var (
 var zookeeperClient *kazoo.Kazoo
 var brokerClient sarama.Client
 
+func bool2float(b bool) float64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func init() {
 	// Register the summary and the histogram with Prometheus's default registry.
 	prometheus.MustRegister(consumergroupGougeVec)
@@ -118,7 +127,8 @@ func init() {
 func updateOffsets() {
 	startTime := time.Now()
 	fmt.Println("Updating offset stats, Time: ", time.Now())
-	groups, err := zookeeperClient.Consumergroups()
+	oldConsumerGroups, err := zookeeperClient.Consumergroups()
+
 	if err != nil {
 		fmt.Println("Error reading consumergroup offsets: ", err)
 		initClients()
@@ -127,14 +137,32 @@ func updateOffsets() {
 
 
 	topics, err := zookeeperClient.Topics()
+
+	if err != nil {
+		initClients()
+		return
+	}
+
 	for _, topic := range  topics {
 		partitions, _ := topic.Partitions()
 		for _, partition := range partitions {
 			topicLabel := map[string]string{"topic": topic.Name, "partition": strconv.Itoa(int(partition.ID))}
 
-			isr, _ := partition.ISR()
+			isr, err := partition.ISR()
+			if err != nil {
+				fmt.Println("Error getting replica state for topic/partition: ", topic.Name, partition.ID)
+				return
+			}
+
 			inSyncReplicas.With(topicLabel).Set(float64(len(isr)))
-			underreplicatedPartition.With(topicLabel).Set(float64(partition.UnderReplicated()))
+			underReplicated, err := partition.UnderReplicated()
+
+			if err != nil {
+				fmt.Println("Error getting replica state for topic/partition: ", topic.Name, partition.ID)
+				return
+			}
+
+			underreplicatedPartition.With(topicLabel).Set(bool2float(underReplicated))
 
 			currentOffset, err := brokerClient.GetOffset(topic.Name, partition.ID, sarama.OffsetNewest)
 			oldestOffset, err2 := brokerClient.GetOffset(topic.Name, partition.ID, sarama.OffsetOldest)
@@ -144,17 +172,22 @@ func updateOffsets() {
 				initClients()
 				return
 			}
+			if currentOffset > 0 {
+				topicCurrentOffsetGougeVec.With(topicLabel).Set(float64(currentOffset))
+				topicOldestOffsetGougeVec.With(topicLabel).Set(float64(oldestOffset))
+			}
 
-			topicCurrentOffsetGougeVec.With(topicLabel).Set(float64(currentOffset))
-			topicOldestOffsetGougeVec.With(topicLabel).Set(float64(oldestOffset))
-
-			for _, group := range groups {
+			fmt.Println(oldConsumerGroups)
+			for _, group := range oldConsumerGroups {
 				offset, _ := group.FetchOffset(topic.Name, partition.ID)
-				consumerGroupLabels := map[string]string{"consumergroup": group.Name, "topic": topic.Name, "partition": strconv.Itoa(int(partition.ID))}
-				consumergroupGougeVec.With(consumerGroupLabels).Set(float64(offset))
+				if offset > 0 {
+					consumerGroupLabels := map[string]string{"consumergroup": group.Name, "topic": topic.Name, "partition": strconv.Itoa(int(partition.ID))}
+					consumergroupGougeVec.With(consumerGroupLabels).Set(float64(offset))
 
-				consumerGroupLag := currentOffset - offset
-				consumergroupLagGougeVec.With(consumerGroupLabels).Set(float64(consumerGroupLag))
+					consumerGroupLag := currentOffset - offset
+					consumergroupLagGougeVec.With(consumerGroupLabels).Set(float64(consumerGroupLag))
+				}
+
 			}
 		}
 	}
@@ -171,7 +204,6 @@ func updateTopics() {
 }
 
 func initClients() {
-
 	fmt.Println("Init zookeeper client with connection string: ", *zookeeperConnect)
 	var err error
 	zookeeperClient, err = kazoo.NewKazooFromConnectionString(*zookeeperConnect, nil)
@@ -198,7 +230,16 @@ func initClients() {
 }
 
 func main() {
+	fmt.Println("Running offset exporter")
 	flag.Parse()
+
+	fmt.Println("Settings: ")
+	fmt.Println("listen-address: ", *listenAddress)
+	fmt.Println("telemetry-path: ", *metricsEndpoint)
+	fmt.Println("zookeeper-connect: ", *zookeeperConnect)
+	fmt.Println("cluster-name: ", *clusterName)
+	fmt.Println("refresh-interval: ", *refreshInterval)
+
 
 	//Init Clients
 	initClients()
@@ -208,10 +249,10 @@ func main() {
 		for {
 			updateOffsets()
 			time.Sleep(time.Duration(time.Duration(*refreshInterval) * time.Second))
-		}
-	}()
+}
+}()
 
-	// Expose the registered metrics via HTTP.
-	http.Handle(*metricsEndpoint, promhttp.Handler())
-	log.Fatal(http.ListenAndServe(*listenAddress, nil))
+// Expose the registered metrics via HTTP.
+http.Handle(*metricsEndpoint, promhttp.Handler())
+log.Fatal(http.ListenAndServe(*listenAddress, nil))
 }
