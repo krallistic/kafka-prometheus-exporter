@@ -1,9 +1,10 @@
 {
     "dependencies": {
-        "github.com/Shopify/sarama": {
-            "tag": "v1.12.0"
-        },
+        "github.com/Shopify/sarama": {},
         "github.com/krallistic/kazoo-go": {
+            "branch": "master"
+        },
+        "github.com/namsral/flag": {
             "branch": "master"
         },
         "github.com/prometheus/client_golang": {
