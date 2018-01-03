@@ -1,12 +1,13 @@
 package main
 
-
 import (
-	"github.com/namsral/flag"
 	"log"
 	"net/http"
-	"time"
+	"regexp"
 	"strconv"
+	"time"
+
+	"github.com/namsral/flag"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -15,7 +16,6 @@ import (
 	kazoo "github.com/krallistic/kazoo-go"
 
 	"fmt"
-
 )
 
 var (
@@ -23,7 +23,7 @@ var (
 	metricsEndpoint  = flag.String("telemetry-path", "/metrics", "Path under which to expose metrics.")
 	zookeeperConnect = flag.String("zookeeper-connect", "localhost:2181", "Zookeeper connection string")
 	clusterName      = flag.String("cluster-name", "kafka-cluster", "Name of the Kafka cluster used in static label")
-
+	topicsFilter     = flag.String("topics-filter", "", "Regex expression to export only topics that match expression")
 	refreshInterval  = flag.Int("refresh-interval", 5, "Seconds to sleep in between refreshes")
 )
 
@@ -135,7 +135,6 @@ func updateOffsets() {
 		return
 	}
 
-
 	topics, err := zookeeperClient.Topics()
 
 	if err != nil {
@@ -143,7 +142,21 @@ func updateOffsets() {
 		return
 	}
 
-	for _, topic := range  topics {
+	for _, topic := range topics {
+		if *topicsFilter != "" {
+			match, err := regexp.MatchString(*topicsFilter, topic.Name)
+
+			if err != nil {
+				fmt.Println("Invalid Regex: ", err)
+				panic("Exiting..")
+			}
+
+			if !match {
+				fmt.Println("Filtering out " + topic.Name)
+				continue
+			}
+		}
+
 		partitions, _ := topic.Partitions()
 		for _, partition := range partitions {
 			topicLabel := map[string]string{"topic": topic.Name, "partition": strconv.Itoa(int(partition.ID))}
@@ -167,7 +180,7 @@ func updateOffsets() {
 			currentOffset, err := brokerClient.GetOffset(topic.Name, partition.ID, sarama.OffsetNewest)
 			oldestOffset, err2 := brokerClient.GetOffset(topic.Name, partition.ID, sarama.OffsetOldest)
 
-			if err != nil ||  err2 != nil {
+			if err != nil || err2 != nil {
 				fmt.Println("Error reading offsets from broker for topic, partition: ", topic.Name, partition, err)
 				initClients()
 				return
@@ -240,7 +253,6 @@ func main() {
 	fmt.Println("cluster-name: ", *clusterName)
 	fmt.Println("refresh-interval: ", *refreshInterval)
 
-
 	//Init Clients
 	initClients()
 
@@ -249,10 +261,10 @@ func main() {
 		for {
 			updateOffsets()
 			time.Sleep(time.Duration(time.Duration(*refreshInterval) * time.Second))
-}
-}()
+		}
+	}()
 
-// Expose the registered metrics via HTTP.
-http.Handle(*metricsEndpoint, promhttp.Handler())
-log.Fatal(http.ListenAndServe(*listenAddress, nil))
+	// Expose the registered metrics via HTTP.
+	http.Handle(*metricsEndpoint, promhttp.Handler())
+	log.Fatal(http.ListenAndServe(*listenAddress, nil))
 }
