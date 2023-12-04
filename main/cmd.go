@@ -42,7 +42,7 @@ var (
 		map[string]string{"cluster": *clusterName},
 	)
 
-	consumergroupGougeVec = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	consumergroupGaugeVec = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace:   "kafka",
 		Subsystem:   "consumergroup",
 		Name:        "current_offset",
@@ -51,7 +51,7 @@ var (
 	},
 		[]string{"consumergroup", "topic", "partition"},
 	)
-	consumergroupLagGougeVec = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	consumergroupLagGaugeVec = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace:   "kafka",
 		Subsystem:   "consumergroup",
 		Name:        "lag",
@@ -61,7 +61,7 @@ var (
 		[]string{"consumergroup", "topic", "partition"},
 	)
 
-	topicCurrentOffsetGougeVec = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	topicCurrentOffsetGaugeVec = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace:   "kafka",
 		Subsystem:   "topic",
 		Name:        "current_offset",
@@ -71,7 +71,7 @@ var (
 		[]string{"topic", "partition"},
 	)
 
-	topicOldestOffsetGougeVec = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	topicOldestOffsetGaugeVec = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace:   "kafka",
 		Subsystem:   "topic",
 		Name:        "oldest_offset",
@@ -113,11 +113,11 @@ func bool2float(b bool) float64 {
 
 func init() {
 	// Register the summary and the histogram with Prometheus's default registry.
-	prometheus.MustRegister(consumergroupGougeVec)
-	prometheus.MustRegister(consumergroupLagGougeVec)
+	prometheus.MustRegister(consumergroupGaugeVec)
+	prometheus.MustRegister(consumergroupLagGaugeVec)
 
-	prometheus.MustRegister(topicCurrentOffsetGougeVec)
-	prometheus.MustRegister(topicOldestOffsetGougeVec)
+	prometheus.MustRegister(topicCurrentOffsetGaugeVec)
+	prometheus.MustRegister(topicOldestOffsetGaugeVec)
 
 	prometheus.MustRegister(inSyncReplicas)
 	prometheus.MustRegister(underreplicatedPartition)
@@ -186,8 +186,8 @@ func updateOffsets() {
 				return
 			}
 			if currentOffset > 0 {
-				topicCurrentOffsetGougeVec.With(topicLabel).Set(float64(currentOffset))
-				topicOldestOffsetGougeVec.With(topicLabel).Set(float64(oldestOffset))
+				topicCurrentOffsetGaugeVec.With(topicLabel).Set(float64(currentOffset))
+				topicOldestOffsetGaugeVec.With(topicLabel).Set(float64(oldestOffset))
 			}
 
 			fmt.Println(oldConsumerGroups)
@@ -195,10 +195,10 @@ func updateOffsets() {
 				offset, _ := group.FetchOffset(topic.Name, partition.ID)
 				if offset > 0 {
 					consumerGroupLabels := map[string]string{"consumergroup": group.Name, "topic": topic.Name, "partition": strconv.Itoa(int(partition.ID))}
-					consumergroupGougeVec.With(consumerGroupLabels).Set(float64(offset))
+					consumergroupGaugeVec.With(consumerGroupLabels).Set(float64(offset))
 
 					consumerGroupLag := currentOffset - offset
-					consumergroupLagGougeVec.With(consumerGroupLabels).Set(float64(consumerGroupLag))
+					consumergroupLagGaugeVec.With(consumerGroupLabels).Set(float64(consumerGroupLag))
 				}
 
 			}
